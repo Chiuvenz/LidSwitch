@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Chiuvenz/LidSwitch/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Chiuvenz/LidSwitch/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%2014%2B-black">
   <img alt="Architecture" src="https://img.shields.io/badge/architecture-Apple%20Silicon-0b7285">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-2ea44f"></a>
