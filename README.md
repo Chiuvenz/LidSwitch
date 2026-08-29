@@ -23,7 +23,7 @@ LidSwitch 是一个轻量级原生 macOS 菜单栏应用，为经常在 MacBook 
 | 开盖 | 启用 | 从桌面布局中停用 |
 | 合盖 | 由 macOS 合盖模式关闭 | 启用 |
 
-它执行真正的逻辑显示器切换，不是单纯把亮度调到零，因此鼠标和窗口不会跑到已经停用的屏幕。
+适用场景：办公桌上放置一个固定小桌面，坐下时使用外接屏幕，站起时使用MacBook，屏幕鼠标键盘跟随，隐私有保护。
 
 ## 功能
 
@@ -62,7 +62,7 @@ make test
 make run
 ```
 
-构建出的应用位于 `dist/LidSwitch.app`。长期使用时，建议先退出测试实例，再把它移动到 `/Applications` 并重新打开。
+构建出的应用位于 `dist/LidSwitch.app`。
 
 只读诊断：
 
@@ -89,7 +89,6 @@ dist/LidSwitch.app/Contents/MacOS/LidSwitch --diagnose
 
 LidSwitch 使用 Swift、AppKit、IOKit 与 CoreGraphics，并动态调用未公开的 SkyLight 显示拓扑接口。它不链接私有框架，也不需要特殊系统权限，但仍存在以下限制：
 
-- 不适合提交到 Mac App Store。
 - macOS 大版本升级后，私有接口可能需要重新适配。
 - 被 `SIGKILL` 强制结束时，session 级配置可能来不及恢复。
 - 当前版本会统一控制所有可识别外屏，暂不提供显示器白名单。
