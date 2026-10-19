@@ -71,11 +71,43 @@ public enum ReconciliationStep: Equatable, Sendable {
 public struct ReconciliationPlanner: Sendable {
     public init() {}
 
-    public func nextStep(for snapshot: DisplaySnapshot) -> ReconciliationStep {
+    public func nextStep(
+        for snapshot: DisplaySnapshot,
+        preferredExternalIDs: Set<UInt32> = []
+    ) -> ReconciliationStep {
         let externals = snapshot.externalDisplays
 
         switch snapshot.lid {
         case .closed:
+            let preferred = externals
+                .filter { preferredExternalIDs.contains($0.id) }
+            if !preferred.isEmpty {
+                let disabledPreferred = preferred.filter { !$0.isActive }.map(\.id)
+                if !disabledPreferred.isEmpty {
+                    return .enable(
+                        ids: disabledPreferred,
+                        reason: "合盖后启用外接显示器"
+                    )
+                }
+                return .stable(reason: "合盖模式已就绪")
+            }
+
+            // SkyLight may keep an offline record for a display after assigning
+            // the same physical monitor a new display ID. If any external is
+            // already active, clamshell mode is ready and those stale records
+            // must not be enabled.
+            guard !externals.contains(where: \.isActive) else {
+                return .stable(reason: "合盖模式已就绪")
+            }
+
+            // An online-but-inactive display is a safer fallback than a record
+            // known to SkyLight only. The final fallback preserves cold-start
+            // behavior where a disabled display is reported as offline.
+            let online = externals.filter(\.isOnline).map(\.id)
+            if !online.isEmpty {
+                return .enable(ids: online, reason: "合盖后启用外接显示器")
+            }
+
             let disabled = externals.filter { !$0.isActive }.map(\.id)
             guard !disabled.isEmpty else {
                 return .stable(reason: externals.isEmpty

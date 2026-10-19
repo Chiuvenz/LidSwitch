@@ -17,6 +17,13 @@ enum DisplayControllerError: LocalizedError {
             return "显示器操作失败（错误码 \(code)）"
         }
     }
+
+    var isRetryable: Bool {
+        guard case .operationFailed(let code) = self else { return false }
+        // CoreGraphics reports transient display-server contention as either
+        // kCGErrorFailure or kCGErrorCannotComplete.
+        return code == 1000 || code == 1004
+    }
 }
 
 final class DisplayController {
@@ -68,9 +75,12 @@ final class DisplayController {
         }
     }
 
-    func restoreAll(lid: LidState) throws {
+    func restoreAll(lid: LidState, preferredExternalIDs: Set<UInt32> = []) throws {
         let state = try snapshot(lid: lid)
-        var ids = state.externalDisplays.map(\.id)
+        let preferred = state.externalDisplays
+            .filter { preferredExternalIDs.contains($0.id) }
+            .map(\.id)
+        var ids = preferred.isEmpty ? state.externalDisplays.map(\.id) : preferred
         if lid != .closed, let builtIn = state.builtIn {
             ids.append(builtIn.id)
         }

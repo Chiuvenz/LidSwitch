@@ -19,7 +19,7 @@ enum Diagnostics {
                     "id=\(display.id) builtin=\(display.isBuiltIn) " +
                     "active=\(display.isActive) online=\(display.isOnline) " +
                     "main=\(display.isMain) vendor=\(display.vendor) " +
-                    "model=\(display.model)"
+                    "model=\(display.model) serial=\(display.serial)"
                 )
             }
 

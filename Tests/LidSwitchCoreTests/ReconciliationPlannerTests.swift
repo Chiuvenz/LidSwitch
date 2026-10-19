@@ -16,6 +16,60 @@ struct ReconciliationPlannerTests {
         ))
     }
 
+    @Test func closedLidDoesNotEnableOfflineGhostWhenExternalIsAlreadyActive() {
+        let snapshot = DisplaySnapshot(
+            lid: .closed,
+            displays: [
+                builtIn(active: false),
+                external(id: 3, active: true),
+                external(id: 2, active: false)
+            ]
+        )
+
+        #expect(planner.nextStep(for: snapshot) == .stable(
+            reason: "合盖模式已就绪"
+        ))
+    }
+
+    @Test func closedLidRestoresOnlyPreviouslyActiveExternal() {
+        let snapshot = DisplaySnapshot(
+            lid: .closed,
+            displays: [
+                builtIn(active: false),
+                external(id: 3, active: false),
+                external(id: 2, active: false)
+            ]
+        )
+
+        #expect(planner.nextStep(
+            for: snapshot,
+            preferredExternalIDs: [3]
+        ) == .enable(
+            ids: [3],
+            reason: "合盖后启用外接显示器"
+        ))
+    }
+
+    @Test func closedLidFinishesRestoringMultiplePreferredExternals() {
+        let snapshot = DisplaySnapshot(
+            lid: .closed,
+            displays: [
+                builtIn(active: false),
+                external(id: 3, active: true),
+                external(id: 4, active: false),
+                external(id: 2, active: false)
+            ]
+        )
+
+        #expect(planner.nextStep(
+            for: snapshot,
+            preferredExternalIDs: [3, 4]
+        ) == .enable(
+            ids: [4],
+            reason: "合盖后启用外接显示器"
+        ))
+    }
+
     @Test func openLidEnablesBuiltInBeforeDisablingExternal() {
         let snapshot = DisplaySnapshot(
             lid: .open,
@@ -85,9 +139,9 @@ struct ReconciliationPlannerTests {
         )
     }
 
-    private func external(active: Bool) -> DisplayRecord {
+    private func external(id: UInt32 = 2, active: Bool) -> DisplayRecord {
         DisplayRecord(
-            id: 2,
+            id: id,
             vendor: 25001,
             model: 45061,
             serial: 0,

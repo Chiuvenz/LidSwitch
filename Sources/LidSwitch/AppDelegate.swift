@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var coordinator = SwitchCoordinator(controller: controller)
     private var lidObserver: LidObserver?
     private var screenObserver: NSObjectProtocol?
+    private var screenReconcileWorkItem: DispatchWorkItem?
     private var workspaceObservers: [NSObjectProtocol] = []
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -39,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let observer = LidObserver { [weak self] state in
             guard let self else { return }
+            self.screenReconcileWorkItem?.cancel()
             self.coordinator.reconcile(
                 trigger: state == .closed ? "检测到合盖" : "检测到开盖",
                 automatic: self.automaticEnabled
@@ -56,10 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                self.coordinator.reconcile(
-                    trigger: "显示器配置发生变化",
-                    automatic: self.automaticEnabled
-                )
+                self.scheduleScreenReconciliation()
             }
         }
 
@@ -99,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        screenReconcileWorkItem?.cancel()
         coordinator.restoreAll()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
@@ -153,6 +153,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         statusItem.menu = menu
+    }
+
+    private func scheduleScreenReconciliation() {
+        screenReconcileWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.coordinator.reconcile(
+                trigger: "显示器配置发生变化",
+                automatic: self.automaticEnabled
+            )
+        }
+        screenReconcileWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: item)
     }
 
     @objc private func toggleAutomatic() {
