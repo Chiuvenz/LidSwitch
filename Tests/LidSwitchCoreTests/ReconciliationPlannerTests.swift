@@ -4,34 +4,29 @@ import Testing
 struct ReconciliationPlannerTests {
     private let planner = ReconciliationPlanner()
 
-    @Test func closedLidEnablesInactiveExternalDisplay() {
+    @Test func builtInDefaultLeavesExternalDisplaysAloneWhenOpen() {
         let snapshot = DisplaySnapshot(
-            lid: .closed,
-            displays: [builtIn(active: false), external(active: false)]
-        )
-
-        #expect(planner.nextStep(for: snapshot) == .enable(
-            ids: [2],
-            reason: "合盖后启用外接显示器"
-        ))
-    }
-
-    @Test func closedLidDoesNotEnableOfflineGhostWhenExternalIsAlreadyActive() {
-        let snapshot = DisplaySnapshot(
-            lid: .closed,
-            displays: [
-                builtIn(active: false),
-                external(id: 3, active: true),
-                external(id: 2, active: false)
-            ]
+            lid: .open,
+            displays: [builtIn(active: true), external(id: 2, active: true)]
         )
 
         #expect(planner.nextStep(for: snapshot) == .stable(
-            reason: "合盖模式已就绪"
+            reason: "使用内建显示器；其他屏幕交给 macOS 管理"
         ))
     }
 
-    @Test func closedLidRestoresOnlyPreviouslyActiveExternal() {
+    @Test func builtInDefaultLeavesSystemConfigurationAloneWhenClosed() {
+        let snapshot = DisplaySnapshot(
+            lid: .closed,
+            displays: [builtIn(active: false), external(id: 2, active: true)]
+        )
+
+        #expect(planner.nextStep(for: snapshot) == .stable(
+            reason: "未选择受控外屏；保留系统显示器配置"
+        ))
+    }
+
+    @Test func selectedExternalIsEnabledWhenClosed() {
         let snapshot = DisplaySnapshot(
             lid: .closed,
             displays: [
@@ -43,66 +38,70 @@ struct ReconciliationPlannerTests {
 
         #expect(planner.nextStep(
             for: snapshot,
-            preferredExternalIDs: [3]
+            selectedExternalIDs: [3]
         ) == .enable(
             ids: [3],
-            reason: "合盖后启用外接显示器"
+            reason: "合盖后启用合盖组显示器"
         ))
     }
 
-    @Test func closedLidFinishesRestoringMultiplePreferredExternals() {
+    @Test func onlySelectedExternalIsDisabledWhenOpen() {
         let snapshot = DisplaySnapshot(
-            lid: .closed,
+            lid: .open,
             displays: [
-                builtIn(active: false),
+                builtIn(active: true),
                 external(id: 3, active: true),
-                external(id: 4, active: false),
-                external(id: 2, active: false)
+                external(id: 4, active: true)
             ]
         )
 
         #expect(planner.nextStep(
             for: snapshot,
-            preferredExternalIDs: [3, 4]
-        ) == .enable(
-            ids: [4],
-            reason: "合盖后启用外接显示器"
+            selectedExternalIDs: [3]
+        ) == .disable(
+            ids: [3],
+            reason: "开盖组就绪后停用合盖组显示器"
         ))
     }
 
-    @Test func openLidEnablesBuiltInBeforeDisablingExternal() {
+    @Test func openLidEnablesBuiltInBeforeDisablingSelectedExternal() {
         let snapshot = DisplaySnapshot(
             lid: .open,
-            displays: [builtIn(active: false), external(active: true)]
+            displays: [builtIn(active: false), external(id: 3, active: true)]
         )
 
-        #expect(planner.nextStep(for: snapshot) == .enable(
+        #expect(planner.nextStep(
+            for: snapshot,
+            selectedExternalIDs: [3]
+        ) == .enable(
             ids: [1],
             reason: "先启用 MacBook 内建显示器"
         ))
     }
 
-    @Test func openLidDisablesExternalOnlyAfterBuiltInIsActive() {
+    @Test func unavailableSelectedExternalBlocksClosedLidSwitch() {
         let snapshot = DisplaySnapshot(
-            lid: .open,
-            displays: [builtIn(active: true), external(active: true)]
+            lid: .closed,
+            displays: [builtIn(active: false), external(id: 2, active: true)]
         )
 
-        #expect(planner.nextStep(for: snapshot) == .disable(
-            ids: [2],
-            reason: "内屏就绪后停用外接显示器"
+        #expect(planner.nextStep(
+            for: snapshot,
+            selectedExternalIDs: [3]
+        ) == .blocked(
+            reason: "合盖组没有可用的普通外屏，保留当前显示器"
         ))
     }
 
-    @Test func placeholderDisplayIsNeverToggled() {
+    @Test func placeholderDisplayIsNeverSelected() {
         let placeholder = DisplayRecord(
             id: 3,
             vendor: 0,
             model: 0,
             serial: 0,
             isBuiltIn: false,
-            isActive: false,
-            isOnline: false,
+            isActive: true,
+            isOnline: true,
             isMain: false
         )
         let snapshot = DisplaySnapshot(
@@ -110,19 +109,45 @@ struct ReconciliationPlannerTests {
             displays: [builtIn(active: false), placeholder]
         )
 
-        #expect(planner.nextStep(for: snapshot) == .stable(
-            reason: "合盖，但没有检测到外接显示器"
+        #expect(planner.nextStep(
+            for: snapshot,
+            selectedExternalIDs: [3]
+        ) == .blocked(
+            reason: "合盖组没有可用的普通外屏，保留当前显示器"
         ))
     }
 
-    @Test func missingBuiltInBlocksExternalDisable() {
+    @Test func missingBuiltInBlocksOpenLidSwitch() {
         let snapshot = DisplaySnapshot(
             lid: .open,
-            displays: [external(active: true)]
+            displays: [external(id: 3, active: true)]
         )
 
-        #expect(planner.nextStep(for: snapshot) == .blocked(
+        #expect(planner.nextStep(
+            for: snapshot,
+            selectedExternalIDs: [3]
+        ) == .blocked(
             reason: "无法识别 MacBook 内建显示器"
+        ))
+    }
+
+    @Test func allParticipatingExternalsAreDisabledAfterBuiltInIsReady() {
+        let snapshot = DisplaySnapshot(lid: .open, displays: [
+            builtIn(active: true), external(id: 3, active: true),
+            external(id: 4, active: true), external(id: 5, active: true)
+        ])
+        #expect(planner.nextStep(for: snapshot, selectedExternalIDs: [3, 4]) == .disable(
+            ids: [3, 4], reason: "开盖组就绪后停用合盖组显示器"
+        ))
+    }
+
+    @Test func secondParticipatingExternalIsRestoredEvenWhenFirstIsAlreadyActive() {
+        let snapshot = DisplaySnapshot(lid: .closed, displays: [
+            builtIn(active: false), external(id: 3, active: true),
+            external(id: 4, active: false), external(id: 2, active: false)
+        ])
+        #expect(planner.nextStep(for: snapshot, selectedExternalIDs: [3, 4]) == .enable(
+            ids: [4], reason: "合盖后启用合盖组显示器"
         ))
     }
 
@@ -139,7 +164,7 @@ struct ReconciliationPlannerTests {
         )
     }
 
-    private func external(id: UInt32 = 2, active: Bool) -> DisplayRecord {
+    private func external(id: UInt32, active: Bool) -> DisplayRecord {
         DisplayRecord(
             id: id,
             vendor: 25001,

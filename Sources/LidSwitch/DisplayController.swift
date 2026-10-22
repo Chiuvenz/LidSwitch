@@ -1,15 +1,22 @@
 import CLidSwitch
+import CoreGraphics
 import Foundation
 import LidSwitchCore
 
 enum DisplayControllerError: LocalizedError {
     case privateAPIUnavailable
+    case displayUnavailable
+    case sidecarRequiresSession
     case operationFailed(code: Int32)
 
     var errorDescription: String? {
         switch self {
         case .privateAPIUnavailable:
             return "当前 macOS 没有提供 LidSwitch 所需的 SkyLight 接口"
+        case .displayUnavailable:
+            return "所选显示器已断开或暂时不可用"
+        case .sidecarRequiresSession:
+            return "随航显示器必须通过会话管理，不能直接修改显示器拓扑"
         case .operationFailed(let code):
             if code == LS_ERROR_WOULD_DISABLE_LAST_DISPLAY {
                 return "安全检查阻止了关闭最后一个活动显示器"
@@ -26,7 +33,17 @@ enum DisplayControllerError: LocalizedError {
     }
 }
 
-final class DisplayController {
+@MainActor
+protocol DisplayControlling {
+    var isAvailable: Bool { get }
+    func snapshot(lid: LidState) throws -> DisplaySnapshot
+    func setEnabled(_ enabled: Bool, displayIDs: [UInt32]) throws
+    func restore(lid: LidState, externalIDs: Set<UInt32>) throws
+    func connectedPhysicalDisplayCount() -> Int
+}
+
+final class DisplayController: DisplayControlling {
+    func connectedPhysicalDisplayCount() -> Int { PhysicalDisplayProbe.connectedCount() }
     var isAvailable: Bool {
         LSPrivateAPIStatus() == 0
     }
@@ -59,6 +76,9 @@ final class DisplayController {
 
     func setEnabled(_ enabled: Bool, displayIDs: [UInt32]) throws {
         guard !displayIDs.isEmpty else { return }
+        guard !displayIDs.contains(where: {
+            CGDisplayVendorNumber($0) == SidecarIdentity.displayVendor && CGDisplayModelNumber($0) == SidecarIdentity.displayModel
+        }) else { throw DisplayControllerError.sidecarRequiresSession }
         var ids = displayIDs
         let result = ids.withUnsafeMutableBufferPointer { pointer in
             LSSetDisplaysEnabled(
@@ -75,12 +95,10 @@ final class DisplayController {
         }
     }
 
-    func restoreAll(lid: LidState, preferredExternalIDs: Set<UInt32> = []) throws {
+    func restore(lid: LidState, externalIDs: Set<UInt32>) throws {
         let state = try snapshot(lid: lid)
-        let preferred = state.externalDisplays
-            .filter { preferredExternalIDs.contains($0.id) }
-            .map(\.id)
-        var ids = preferred.isEmpty ? state.externalDisplays.map(\.id) : preferred
+        let knownExternalIDs = Set(state.externalDisplays.filter { !$0.isSidecar }.map(\.id))
+        var ids = Array(externalIDs.intersection(knownExternalIDs))
         if lid != .closed, let builtIn = state.builtIn {
             ids.append(builtIn.id)
         }

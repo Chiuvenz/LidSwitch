@@ -35,6 +35,10 @@ let package = Package(
         .testTarget(
             name: "LidSwitchCoreTests",
             dependencies: ["LidSwitchCore"]
+        ),
+        .testTarget(
+            name: "LidSwitchTests",
+            dependencies: ["LidSwitch", "LidSwitchCore"]
         )
     ],
     swiftLanguageModes: [.v5]

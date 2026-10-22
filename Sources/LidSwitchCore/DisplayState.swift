@@ -41,6 +41,10 @@ public struct DisplayRecord: Equatable, Sendable {
     public var isIdentifiedHardware: Bool {
         isBuiltIn || vendor != 0 || model != 0
     }
+
+    public var isSidecar: Bool {
+        vendor == SidecarIdentity.displayVendor && model == SidecarIdentity.displayModel
+    }
 }
 
 public struct DisplaySnapshot: Equatable, Sendable {
@@ -73,48 +77,49 @@ public struct ReconciliationPlanner: Sendable {
 
     public func nextStep(
         for snapshot: DisplaySnapshot,
-        preferredExternalIDs: Set<UInt32> = []
+        selectedExternalIDs: Set<UInt32>? = nil
     ) -> ReconciliationStep {
-        let externals = snapshot.externalDisplays
+        nextStep(
+            for: snapshot,
+            groups: Dictionary(uniqueKeysWithValues: (selectedExternalIDs ?? []).map { ($0, .closed) }),
+            hasConfiguredDisplays: selectedExternalIDs != nil
+        )
+    }
+
+    public func nextStep(
+        for snapshot: DisplaySnapshot,
+        groups: [UInt32: DisplayGroup],
+        hasConfiguredDisplays: Bool = false
+    ) -> ReconciliationStep {
+        guard snapshot.lid != .unknown else {
+            return .blocked(reason: "暂时无法读取开合盖状态")
+        }
+        let managed = snapshot.externalDisplays.filter {
+            !$0.isSidecar && groups[$0.id] != nil && groups[$0.id] != .unmanaged
+        }
+        let targets = managed.filter { groups[$0.id]?.matches(snapshot.lid) == true }
+        let toEnable = targets.filter { !$0.isActive }.map(\.id).sorted()
+        let toDisable = managed.filter {
+            groups[$0.id]?.matches(snapshot.lid) == false && $0.isActive
+        }.map(\.id).sorted()
 
         switch snapshot.lid {
         case .closed:
-            let preferred = externals
-                .filter { preferredExternalIDs.contains($0.id) }
-            if !preferred.isEmpty {
-                let disabledPreferred = preferred.filter { !$0.isActive }.map(\.id)
-                if !disabledPreferred.isEmpty {
-                    return .enable(
-                        ids: disabledPreferred,
-                        reason: "合盖后启用外接显示器"
-                    )
-                }
-                return .stable(reason: "合盖模式已就绪")
+            if !hasConfiguredDisplays && groups.isEmpty {
+                return .stable(reason: "未选择受控外屏；保留系统显示器配置")
             }
-
-            // SkyLight may keep an offline record for a display after assigning
-            // the same physical monitor a new display ID. If any external is
-            // already active, clamshell mode is ready and those stale records
-            // must not be enabled.
-            guard !externals.contains(where: \.isActive) else {
-                return .stable(reason: "合盖模式已就绪")
+            if !toEnable.isEmpty {
+                return .enable(ids: toEnable, reason: "合盖后启用合盖组显示器")
             }
-
-            // An online-but-inactive display is a safer fallback than a record
-            // known to SkyLight only. The final fallback preserves cold-start
-            // behavior where a disabled display is reported as offline.
-            let online = externals.filter(\.isOnline).map(\.id)
-            if !online.isEmpty {
-                return .enable(ids: online, reason: "合盖后启用外接显示器")
+            // Never use an open-group or virtual display as justification to
+            // turn off the last physical screen during a closed-lid switch.
+            guard targets.contains(where: \.isActive) else {
+                return .blocked(reason: "合盖组没有可用的普通外屏，保留当前显示器")
             }
-
-            let disabled = externals.filter { !$0.isActive }.map(\.id)
-            guard !disabled.isEmpty else {
-                return .stable(reason: externals.isEmpty
-                    ? "合盖，但没有检测到外接显示器"
-                    : "合盖模式已就绪")
+            if !toDisable.isEmpty {
+                return .disable(ids: toDisable, reason: "合盖组就绪后停用开盖组显示器")
             }
-            return .enable(ids: disabled, reason: "合盖后启用外接显示器")
+            return .stable(reason: "合盖组已就绪")
 
         case .open:
             guard let builtIn = snapshot.builtIn else {
@@ -124,11 +129,15 @@ public struct ReconciliationPlanner: Sendable {
                 return .enable(ids: [builtIn.id], reason: "先启用 MacBook 内建显示器")
             }
 
-            let activeExternals = externals.filter(\.isActive).map(\.id)
-            guard !activeExternals.isEmpty else {
-                return .stable(reason: "开盖模式已就绪")
+            if !toEnable.isEmpty {
+                return .enable(ids: toEnable, reason: "开盖后启用开盖组显示器")
             }
-            return .disable(ids: activeExternals, reason: "内屏就绪后停用外接显示器")
+            guard !toDisable.isEmpty else {
+                return .stable(reason: groups.isEmpty && !hasConfiguredDisplays
+                    ? "使用内建显示器；其他屏幕交给 macOS 管理"
+                    : "开盖组已就绪")
+            }
+            return .disable(ids: toDisable, reason: "开盖组就绪后停用合盖组显示器")
 
         case .unknown:
             return .blocked(reason: "暂时无法读取开合盖状态")
